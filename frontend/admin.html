@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>管理員主控台 - PetHotel Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <style>
+      .animate-fade-in { animation: fadeIn 0.4s ease-in-out; }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+    </style>
+  </head>
+  <body class="bg-slate-950 font-sans text-slate-100">
+    <div id="app"></div>
+    <script>
+      const { createApp, ref, onMounted, computed, reactive } = Vue;
+
+      const STAFF_ROLES = ['groomer', 'nanny', 'receptionist', 'admin'];
+
+      createApp({
+        setup() {
+          const bookings   = ref([]);
+          const users      = ref([]);
+          const isFetching = ref(false);
+          const toast      = ref({ msg: '', ok: true });
+          // tabs: 'stats' | 'staff' | 'customers'
+          const activeTab  = ref('stats');
+
+          // ── new-user forms ──
+          const newStaff    = reactive({ email: '', name: '', role: 'groomer', password: '' });
+          const newCustomer = reactive({ email: '', name: '', password: '' });
+          const creating    = ref(false);
+
+          // ── edit modal ──
+          const editTarget = ref(null);
+
+          const prices = ref({ R01: 600, R02: 1200, R03: 1800 });
+
+          const token = () => localStorage.getItem('access_token');
+
+          const showToast = (msg, ok = true) => {
+            toast.value = { msg, ok };
+            setTimeout(() => toast.value = { msg: '', ok: true }, 3500);
+          };
+
+          // ── computed splits ──
+          const staffList    = computed(() => users.value.filter(u => STAFF_ROLES.includes(u.role)));
+          const customerList = computed(() => users.value.filter(u => u.role === 'customer'));
+
+          // ── fetch ──
+          const fetchBookings = async () => {
+            const r = await fetch('/api/booking/all', { headers: { Authorization: `Bearer ${token()}` } });
+            const d = await r.json();
+            if (r.ok) bookings.value = d.bookings;
+          };
+
+          const fetchUsers = async () => {
+            const r = await fetch('/api/admin/users', { headers: { Authorization: `Bearer ${token()}` } });
+            const d = await r.json();
+            if (r.ok) users.value = d.users;
+            else showToast('載入使用者失敗: ' + (d.error || r.status), false);
+          };
+
+          const fetchAll = async () => {
+            isFetching.value = true;
+            try { await Promise.all([fetchBookings(), fetchUsers()]); }
+            finally { isFetching.value = false; }
+          };
+
+          // ── create ──
+          const submitCreate = async (payload) => {
+            if (!payload.email || !payload.password) { showToast('Email 與密碼為必填', false); return; }
+            creating.value = true;
+            try {
+              const r = await fetch('/api/admin/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+                body: JSON.stringify(payload),
+              });
+              const d = await r.json();
+              if (r.ok) {
+                users.value.push(d.user);
+                showToast('✅ 使用者已新增');
+                return true;
+              } else {
+                showToast('新增失敗: ' + (d.error || r.status), false);
+                return false;
+              }
+            } finally { creating.value = false; }
+          };
+
+          const submitCreateStaff = async () => {
+            const ok = await submitCreate({ ...newStaff });
+            if (ok) Object.assign(newStaff, { email: '', name: '', role: 'groomer', password: '' });
+          };
+
+          const submitCreateCustomer = async () => {
+            const ok = await submitCreate({ ...newCustomer, role: 'customer' });
+            if (ok) Object.assign(newCustomer, { email: '', name: '', password: '' });
+          };
+
+          // ── edit / save ──
+          const openEdit = (u) => { editTarget.value = { ...u, password: '' }; };
+
+          const saveEdit = async () => {
+            const u = editTarget.value;
+            const payload = { name: u.name, role: u.role, email: u.email };
+            if (u.password) payload.password = u.password;
+            const r = await fetch(`/api/admin/users/${u.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+              body: JSON.stringify(payload),
+            });
+            const d = await r.json();
+            if (r.ok) {
+              const idx = users.value.findIndex(x => x.id === u.id);
+              if (idx !== -1) users.value[idx] = d.user;
+              editTarget.value = null;
+              showToast('✅ 使用者資料已更新');
+            } else {
+              showToast('更新失敗: ' + (d.error || r.status), false);
+            }
+          };
+
+          // ── delete ──
+          const deleteUser = async (u) => {
+            if (!confirm(`確定要刪除「${u.name || u.email}」？此操作無法復原。`)) return;
+            const r = await fetch(`/api/admin/users/${u.id}`, {
+              method: 'DELETE', headers: { Authorization: `Bearer ${token()}` }
+            });
+            const d = await r.json();
+            if (r.ok) { users.value = users.value.filter(x => x.id !== u.id); showToast('🗑️ 已刪除'); }
+            else showToast('刪除失敗: ' + (d.error || r.status), false);
+          };
+
+          onMounted(() => {
+            const tok = localStorage.getItem('access_token');
+            const role = localStorage.getItem('user_role');
+            if (!tok || role !== 'admin') { window.location.href = './login.html'; return; }
+            fetchAll();
+          });
+
+          const stats = computed(() => ({
+            totalBookings:   bookings.value.length,
+            activeOccupancy: bookings.value.filter(b => ['confirmed','checked_in'].includes(b.status)).length,
+            pendingAudits:   bookings.value.filter(b => b.status === 'pending').length,
+            totalUsers:      users.value.length,
+          }));
+
+          const updatePrice = (id, delta) => {
+            prices.value[id] += delta;
+            showToast(`💰 定價已調整為 NT$ ${prices.value[id]} / 晚`);
+          };
+
+          const roleBadge = (role) => ({
+            admin:        'bg-cyan-950/80 text-cyan-400 border-cyan-800',
+            receptionist: 'bg-indigo-950/80 text-indigo-400 border-indigo-800',
+            nanny:        'bg-amber-950/80 text-amber-400 border-amber-800',
+            groomer:      'bg-orange-950/80 text-orange-400 border-orange-800',
+            customer:     'bg-slate-800 text-slate-400 border-slate-700',
+          }[role] || 'bg-slate-800 text-slate-400 border-slate-700');
+
+          const roleLabel = (role) => ({
+            admin: '管理員', receptionist: '前台接待', nanny: '寵物保母',
+            groomer: '美容師', customer: '一般顧客',
+          }[role] || role);
+
+          return {
+            bookings, users, staffList, customerList, prices, isFetching, toast, stats,
+            activeTab, newStaff, newCustomer, creating, editTarget,
+            updatePrice, fetchAll,
+            submitCreateStaff, submitCreateCustomer,
+            openEdit, saveEdit, deleteUser, roleBadge, roleLabel,
+          };
+        },
+
+        template: `
+          <div class="min-h-screen bg-slate-950 text-slate-100 font-sans">
+
+            <!-- header -->
+            <header class="bg-slate-900/80 backdrop-blur border-b border-slate-800 sticky top-0 z-10">
+              <div class="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+                <a href="./index.html" class="text-2xl font-extrabold text-cyan-400 hover:text-cyan-300 transition flex items-center gap-2">
+                  🛡️ PetHotel Pro 控制中心
+                </a>
+                <div class="flex items-center gap-3">
+                  <button @click="fetchAll" :disabled="isFetching"
+                    class="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg transition font-semibold">
+                    {{ isFetching ? '載入中…' : '🔄 重新整理' }}
+                  </button>
+                  <span class="bg-cyan-950 text-cyan-400 text-xs font-bold px-3 py-1.5 rounded-full border border-cyan-800">
+                    最高權限管理員 👑
+                  </span>
+                </div>
+              </div>
+            </header>
+
+            <main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
+
+              <!-- toast -->
+              <div v-if="toast.msg"
+                :class="['p-4 border-l-4 rounded-xl text-sm font-bold shadow-2xl animate-fade-in flex justify-between items-center',
+                  toast.ok ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300' : 'bg-red-950/80 border-red-500 text-red-300']">
+                <span>{{ toast.msg }}</span>
+                <button @click="toast.msg=''" class="ml-4 font-bold opacity-70 hover:opacity-100">✕</button>
+              </div>
+
+              <!-- stats -->
+              <section class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                  <div class="text-slate-400 text-sm font-semibold">總預約單</div>
+                  <div class="text-3xl font-extrabold text-cyan-400 mt-2">{{ stats.totalBookings }}</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                  <div class="text-slate-400 text-sm font-semibold">在店毛孩</div>
+                  <div class="text-3xl font-extrabold text-emerald-400 mt-2">{{ stats.activeOccupancy }}</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                  <div class="text-slate-400 text-sm font-semibold">員工人數</div>
+                  <div class="text-3xl font-extrabold text-violet-400 mt-2">{{ staffList.length }}</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                  <div class="text-slate-400 text-sm font-semibold">顧客人數</div>
+                  <div class="text-3xl font-extrabold text-pink-400 mt-2">{{ customerList.length }}</div>
+                </div>
+              </section>
+
+              <!-- tabs -->
+              <div class="flex gap-2 border-b border-slate-800">
+                <button v-for="tab in [{k:'stats',l:'📊 預約與定價'},{k:'staff',l:'👔 員工管理'},{k:'customers',l:'🐾 顧客管理'}]"
+                  :key="tab.k" @click="activeTab=tab.k"
+                  :class="['px-5 py-2 text-sm font-bold rounded-t-lg transition',
+                    activeTab===tab.k ? 'bg-slate-900 text-cyan-400 border border-b-0 border-slate-700' : 'text-slate-400 hover:text-slate-200']">
+                  {{ tab.l }}
+                </button>
+              </div>
+
+              <!-- ══ TAB: stats ══ -->
+              <div v-if="activeTab==='stats'" class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <section class="lg:col-span-1">
+                  <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                    <h2 class="text-xl font-bold border-l-4 border-cyan-400 pl-2">房型定價調整</h2>
+                    <div v-for="(price, id) in prices" :key="id" class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                      <div class="flex justify-between items-center">
+                        <span class="font-bold text-sm">{{ {R01:'標準喵星艙',R02:'豪華汪星庭院',R03:'尊爵套房'}[id] }}</span>
+                        <span class="text-cyan-400 font-extrabold">NT$ {{ price }}</span>
+                      </div>
+                      <div class="flex gap-2">
+                        <button @click="updatePrice(id,-50)" class="flex-1 bg-slate-800 hover:bg-slate-700 text-xs font-bold py-2 rounded-lg">- $50</button>
+                        <button @click="updatePrice(id, 50)" class="flex-1 bg-cyan-900 hover:bg-cyan-800 text-cyan-300 text-xs font-bold py-2 rounded-lg">+ $50</button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+                <section class="lg:col-span-2">
+                  <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                    <h2 class="text-xl font-bold border-l-4 border-cyan-400 pl-2 mb-4">所有預約</h2>
+                    <div class="overflow-x-auto">
+                      <table class="w-full text-left text-sm">
+                        <thead>
+                          <tr class="text-slate-400 text-xs border-b border-slate-800">
+                            <th class="py-2 px-3">ID</th><th class="py-2 px-3">寵物</th>
+                            <th class="py-2 px-3">房間</th><th class="py-2 px-3">入住</th>
+                            <th class="py-2 px-3">退房</th><th class="py-2 px-3">狀態</th>
+                          </tr>
+                        </thead>
+                        <tbody class="text-slate-300">
+                          <tr v-for="b in bookings" :key="b.id" class="border-b border-slate-800 hover:bg-slate-800/30">
+                            <td class="py-2 px-3 font-mono text-slate-500">#{{ b.id }}</td>
+                            <td class="py-2 px-3 font-bold">{{ b.petName }}</td>
+                            <td class="py-2 px-3 font-mono">{{ b.roomCode }}</td>
+                            <td class="py-2 px-3 text-xs">{{ b.checkIn }}</td>
+                            <td class="py-2 px-3 text-xs">{{ b.checkOut }}</td>
+                            <td class="py-2 px-3">
+                              <span class="px-2 py-0.5 rounded-full text-xs font-bold border"
+                                :class="b.status==='confirmed'?'bg-emerald-950 text-emerald-400 border-emerald-800':
+                                        b.status==='pending'?'bg-amber-950 text-amber-400 border-amber-800':
+                                        b.status==='checked_in'?'bg-cyan-950 text-cyan-400 border-cyan-800':
+                                        'bg-slate-800 text-slate-400 border-slate-700'">
+                                {{ b.status }}
+                              </span>
+                            </td>
+                          </tr>
+                          <tr v-if="!bookings.length"><td colspan="6" class="text-center py-8 text-slate-500">尚無預約資料</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <!-- ══ TAB: staff ══ -->
+              <div v-if="activeTab==='staff'" class="space-y-6">
+
+                <!-- 新增員工 -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                  <h2 class="text-xl font-bold border-l-4 border-violet-400 pl-2 mb-4">新增員工帳號</h2>
+                  <div class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+                    <div>
+                      <label class="text-xs text-slate-400 block mb-1">Email *</label>
+                      <input v-model="newStaff.email" type="email" placeholder="staff@example.com"
+                        class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500" />
+                    </div>
+                    <div>
+                      <label class="text-xs text-slate-400 block mb-1">姓名</label>
+                      <input v-model="newStaff.name" type="text" placeholder="王小明"
+                        class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500" />
+                    </div>
+                    <div>
+                      <label class="text-xs text-slate-400 block mb-1">職位</label>
+                      <select v-model="newStaff.role"
+                        class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500">
+                        <option value="groomer">美容師</option>
+                        <option value="nanny">寵物保母</option>
+                        <option value="receptionist">前台接待</option>
+                        <option value="admin">管理員</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="text-xs text-slate-400 block mb-1">密碼 *</label>
+                      <input v-model="newStaff.password" type="password" placeholder="至少6位"
+                        class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500" />
+                    </div>
+                    <button @click="submitCreateStaff" :disabled="creating"
+                      class="bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white font-bold py-2 px-4 rounded-lg text-sm transition">
+                      {{ creating ? '建立中…' : '+ 新增員工' }}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 員工列表 -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                  <h2 class="text-xl font-bold border-l-4 border-violet-400 pl-2 mb-4">員工列表 ({{ staffList.length }})</h2>
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                      <thead>
+                        <tr class="text-slate-400 text-xs border-b border-slate-800">
+                          <th class="py-2 px-3">ID</th><th class="py-2 px-3">姓名</th>
+                          <th class="py-2 px-3">Email</th><th class="py-2 px-3">職位</th>
+                          <th class="py-2 px-3">建立時間</th><th class="py-2 px-3 text-right">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody class="text-slate-300">
+                        <tr v-for="u in staffList" :key="u.id" class="border-b border-slate-800 hover:bg-slate-800/30">
+                          <td class="py-2.5 px-3 font-mono text-slate-500">#{{ u.id }}</td>
+                          <td class="py-2.5 px-3 font-bold">{{ u.name || '—' }}</td>
+                          <td class="py-2.5 px-3 font-mono text-xs text-slate-400">{{ u.email }}</td>
+                          <td class="py-2.5 px-3">
+                            <span :class="['px-2.5 py-0.5 rounded-full text-xs font-bold border', roleBadge(u.role)]">
+                              {{ roleLabel(u.role) }}
+                            </span>
+                          </td>
+                          <td class="py-2.5 px-3 text-xs text-slate-500">{{ (u.created_at||'').slice(0,10) }}</td>
+                          <td class="py-2.5 px-3 text-right space-x-2">
+                            <button @click="openEdit(u)" class="text-xs px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold transition">✏️ 編輯</button>
+                            <button @click="deleteUser(u)" class="text-xs px-3 py-1 bg-red-900/60 hover:bg-red-800 text-red-300 rounded-lg font-bold transition">🗑️ 刪除</button>
+                          </td>
+                        </tr>
+                        <tr v-if="!staffList.length"><td colspan="6" class="text-center py-8 text-slate-500">尚無員工帳號</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ══ TAB: customers ══ -->
+              <div v-if="activeTab==='customers'" class="space-y-6">
+
+                <!-- 新增顧客 -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                  <h2 class="text-xl font-bold border-l-4 border-pink-500 pl-2 mb-4">新增顧客帳號</h2>
+                  <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                    <div>
+                      <label class="text-xs text-slate-400 block mb-1">Email *</label>
+                      <input v-model="newCustomer.email" type="email" placeholder="customer@example.com"
+                        class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-pink-500" />
+                    </div>
+                    <div>
+                      <label class="text-xs text-slate-400 block mb-1">姓名</label>
+                      <input v-model="newCustomer.name" type="text" placeholder="陳大明"
+                        class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-pink-500" />
+                    </div>
+                    <div>
+                      <label class="text-xs text-slate-400 block mb-1">密碼 *</label>
+                      <input v-model="newCustomer.password" type="password" placeholder="至少6位"
+                        class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-pink-500" />
+                    </div>
+                    <button @click="submitCreateCustomer" :disabled="creating"
+                      class="bg-pink-700 hover:bg-pink-600 disabled:opacity-50 text-white font-bold py-2 px-4 rounded-lg text-sm transition">
+                      {{ creating ? '建立中…' : '+ 新增顧客' }}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 顧客列表 -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                  <h2 class="text-xl font-bold border-l-4 border-pink-500 pl-2 mb-4">顧客列表 ({{ customerList.length }})</h2>
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                      <thead>
+                        <tr class="text-slate-400 text-xs border-b border-slate-800">
+                          <th class="py-2 px-3">ID</th><th class="py-2 px-3">姓名</th>
+                          <th class="py-2 px-3">Email</th><th class="py-2 px-3">建立時間</th>
+                          <th class="py-2 px-3 text-right">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody class="text-slate-300">
+                        <tr v-for="u in customerList" :key="u.id" class="border-b border-slate-800 hover:bg-slate-800/30">
+                          <td class="py-2.5 px-3 font-mono text-slate-500">#{{ u.id }}</td>
+                          <td class="py-2.5 px-3 font-bold">{{ u.name || '—' }}</td>
+                          <td class="py-2.5 px-3 font-mono text-xs text-slate-400">{{ u.email }}</td>
+                          <td class="py-2.5 px-3 text-xs text-slate-500">{{ (u.created_at||'').slice(0,10) }}</td>
+                          <td class="py-2.5 px-3 text-right space-x-2">
+                            <button @click="openEdit(u)" class="text-xs px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold transition">✏️ 編輯</button>
+                            <button @click="deleteUser(u)" class="text-xs px-3 py-1 bg-red-900/60 hover:bg-red-800 text-red-300 rounded-lg font-bold transition">🗑️ 刪除</button>
+                          </td>
+                        </tr>
+                        <tr v-if="!customerList.length"><td colspan="5" class="text-center py-8 text-slate-500">尚無顧客帳號</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+            </main>
+
+            <!-- ── edit modal ── -->
+            <div v-if="editTarget" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+              <div class="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4 animate-fade-in">
+                <h3 class="text-lg font-bold">編輯使用者 #{{ editTarget.id }}</h3>
+
+                <div>
+                  <label class="text-xs text-slate-400 block mb-1">姓名</label>
+                  <input v-model="editTarget.name" type="text"
+                    class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-cyan-500" />
+                </div>
+                <div>
+                  <label class="text-xs text-slate-400 block mb-1">Email</label>
+                  <input v-model="editTarget.email" type="email"
+                    class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-cyan-500" />
+                </div>
+                <div>
+                  <label class="text-xs text-slate-400 block mb-1">角色</label>
+                  <select v-model="editTarget.role"
+                    class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-cyan-500">
+                    <option value="customer">一般顧客</option>
+                    <option value="groomer">美容師</option>
+                    <option value="nanny">寵物保母</option>
+                    <option value="receptionist">前台接待</option>
+                    <option value="admin">管理員</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-xs text-slate-400 block mb-1">新密碼（留空不更改）</label>
+                  <input v-model="editTarget.password" type="password" placeholder="••••••"
+                    class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-cyan-500" />
+                </div>
+                <p class="text-xs text-slate-500">注意：若將顧客改為員工角色，該帳號將移至員工分頁。</p>
+
+                <div class="flex gap-3 pt-2">
+                  <button @click="saveEdit" class="flex-1 bg-cyan-700 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg text-sm transition">儲存變更</button>
+                  <button @click="editTarget=null" class="flex-1 bg-slate-700 hover:bg-slate-600 font-bold py-2 rounded-lg text-sm transition">取消</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        `,
+      }).mount('#app');
+    </script>
+  </body>
+</html>

@@ -1,0 +1,3 @@
+[tool.pyrefly]
+python-interpreter-path = ".conda/python.exe"
+search-path = ["pet-system"]

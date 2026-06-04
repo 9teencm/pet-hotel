@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.conda/
+.venv/
+venv/
+env/
+
+# Flask / SQLite
+backend/instance/
+*.db
+*.sqlite3
+
+# Flask-Migrate
+backend/migrations/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Scratch / temp scripts
+scratch/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>美容師工作台 - PetHotel Pro</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+
+    <style>
+      .animate-fade-in {
+        animation: fadeIn 0.4s ease-in-out;
+      }
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    </style>
+  </head>
+  <body class="bg-orange-50 font-sans text-gray-800">
+    <div id="app"></div>
+
+    <script>
+      const { createApp, ref, onMounted, computed } = Vue;
+
+      createApp({
+        setup() {
+          const bookings = ref([]);
+          const selectedBookingId = ref(null);
+          const reportMessage = ref('');
+          const reportPhoto = ref('');
+          const fileInput = ref(null);
+          
+          const isLoading = ref(false);
+          const isFetching = ref(false);
+          const successToast = ref('');
+          const errorMessage = ref('');
+
+          const presetPhotos = [
+            { name: '🐶 柴犬洗香香', url: 'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?w=500&auto=format&fit=crop&q=80' },
+            { name: '🐱 喵星人精油SPA', url: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=500&auto=format&fit=crop&q=80' },
+            { name: '🦮 黃金獵犬吹風吹', url: 'https://images.unsplash.com/photo-1552053831-71594a27632d?w=500&auto=format&fit=crop&q=80' },
+          ];
+
+          const fetchBookings = async () => {
+            isFetching.value = true;
+            try {
+              const token = localStorage.getItem('access_token');
+              const res = await fetch('/api/booking/all', {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              const data = await res.json();
+              if (res.ok) {
+                bookings.value = data.bookings;
+              }
+            } catch (err) {
+              console.error("載入預約清單失敗", err);
+            } finally {
+              isFetching.value = false;
+            }
+          };
+
+          const activeBookings = computed(() => {
+            return bookings.value.filter(b => b.status === 'confirmed' && b.roomId.startsWith('groomer_'));
+          });
+
+          onMounted(() => {
+            // 🔒 權限與登入狀態安全查核
+            const token = localStorage.getItem('access_token');
+            const role = localStorage.getItem('user_role');
+            if (!token || role !== 'groomer') {
+              // 若未登入或角色非美容師，強制跳轉回登入頁面
+              window.location.href = './login.html';
+              return;
+            }
+
+            fetchBookings();
+            // 預設選擇第一個預設照片
+            reportPhoto.value = presetPhotos[0].url;
+          });
+
+          // 處理檔案上傳並轉成 Base64
+          const handleFileUpload = (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              reportPhoto.value = e.target.result; // 將 Base64 資料賦值
+              showSuccessToast("📸 自訂照片已成功載入！");
+            };
+            reader.readAsDataURL(file);
+          };
+
+          const selectPreset = (url) => {
+            reportPhoto.value = url;
+            // 清空 file input
+            if (fileInput.value) fileInput.value.value = '';
+          };
+
+          const showSuccessToast = (msg) => {
+            successToast.value = msg;
+            setTimeout(() => {
+              successToast.value = '';
+            }, 3000);
+          };
+
+          const submitReport = async () => {
+            if (!selectedBookingId.value) {
+              errorMessage.value = '請先選擇要回報的寵物預約';
+              return;
+            }
+            if (!reportPhoto.value) {
+              errorMessage.value = '請上傳或選擇一張回報照片';
+              return;
+            }
+
+            isLoading.value = true;
+            errorMessage.value = '';
+
+            try {
+              const res = await fetch(`/api/booking/${selectedBookingId.value}/report`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  image_url: reportPhoto.value,
+                  message: reportMessage.value || '毛孩狀態非常好，吃飽睡香香！'
+                })
+              });
+
+              const data = await res.json();
+
+              if (res.ok) {
+                showSuccessToast('🎉 照片回報已成功送出！飼主將同步收到即時通知！');
+                reportMessage.value = '';
+                // 重新載入列表以更新狀態
+                fetchBookings();
+              } else {
+                throw new Error(data.error || '發送回報失敗');
+              }
+            } catch (err) {
+              errorMessage.value = err.message || '連線失敗，請稍後再試';
+            } finally {
+              isLoading.value = false;
+            }
+          };
+
+          return {
+            bookings,
+            activeBookings,
+            selectedBookingId,
+            reportMessage,
+            reportPhoto,
+            presetPhotos,
+            fileInput,
+            isLoading,
+            isFetching,
+            successToast,
+            errorMessage,
+            handleFileUpload,
+            selectPreset,
+            submitReport,
+            fetchBookings
+          };
+        },
+        template: `
+          <div class="min-h-screen bg-orange-50 font-sans text-gray-800">
+            <header class="bg-white shadow-sm sticky top-0 z-10">
+              <div class="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+                <a href="./index.html" class="text-2xl font-extrabold text-orange-600 hover:text-orange-700 transition">✂️ PetHotel Pro 工作台</a>
+                <span class="bg-orange-100 text-orange-800 text-xs font-bold px-3 py-1.5 rounded-full border border-orange-200">
+                  角色：專業寵物美容照護師 💇‍♂️
+                </span>
+              </div>
+            </header>
+
+            <main class="max-w-6xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+              
+              <!-- 左側：在店寵物預約清單 -->
+              <section class="lg:col-span-1 bg-white rounded-2xl shadow-lg p-6 flex flex-col">
+                <div class="flex justify-between items-center mb-6">
+                  <h2 class="text-xl font-bold border-l-4 border-orange-500 pl-2">在店寵物列表</h2>
+                  <button @click="fetchBookings" :disabled="isFetching" class="text-sm text-orange-600 font-bold hover:underline">
+                    {{ isFetching ? '更新中...' : '🔄 重新整理' }}
+                  </button>
+                </div>
+
+                <div v-if="activeBookings.length === 0" class="text-center py-10 text-gray-400 text-sm">
+                  📭 目前店內沒有進行中的精緻美容預約
+                </div>
+
+                <div class="space-y-3 overflow-y-auto max-h-[500px]">
+                  <div v-for="b in activeBookings" :key="b.id"
+                    @click="selectedBookingId = b.id"
+                    :class="['p-4 rounded-xl border-2 cursor-pointer transition transform hover:-translate-y-0.5', selectedBookingId === b.id ? 'border-orange-500 bg-orange-50/50 shadow-md' : 'border-gray-100 hover:border-orange-200 bg-white']">
+                    <div class="flex justify-between items-start mb-2">
+                      <span class="font-extrabold text-lg text-gray-800">🐾 {{ b.petName }}</span>
+                      <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700">
+                        美容照護中
+                      </span>
+                    </div>
+                    <div class="text-xs text-gray-500 space-y-1">
+                      <div>專屬美容造型師：<span class="font-bold text-gray-700">{{ b.roomId === 'groomer_R01' ? '新秀造型師莉莉' : '總監級大師 Kevin' }}</span></div>
+                      <div>預約時間：{{ b.checkIn }}</div>
+                      <div class="text-orange-600 font-semibold" v-if="b.petNotes">📝 備註：{{ b.petNotes }}</div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <!-- 右側：照片回報工作區 -->
+              <section class="lg:col-span-2 space-y-6">
+                <!-- 提示資訊 -->
+                <div v-if="successToast" class="p-4 bg-green-50 border-l-4 border-green-500 text-green-800 rounded-xl text-sm font-bold shadow-md animate-fade-in flex justify-between items-center">
+                  <span>{{ successToast }}</span>
+                  <button @click="successToast = ''" class="text-green-900 font-bold ml-4">✕</button>
+                </div>
+                <div v-if="errorMessage" class="p-4 bg-red-50 border-l-4 border-red-500 text-red-800 rounded-xl text-sm font-bold shadow-md animate-fade-in">
+                  ⚠️ {{ errorMessage }}
+                </div>
+
+                <div class="bg-white rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
+                  <h2 class="text-2xl font-bold border-l-4 border-orange-500 pl-3">發布毛孩狀態照片回報</h2>
+                  
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- 照片預覽區 -->
+                    <div class="space-y-4">
+                      <label class="block text-sm font-bold text-gray-700">📸 當前選擇回報照片</label>
+                      <div class="h-64 bg-gray-100 border-2 border-dashed border-gray-300 rounded-xl overflow-hidden flex items-center justify-center relative group">
+                        <img v-if="reportPhoto" :src="reportPhoto" class="w-full h-full object-cover">
+                        <div v-else class="text-gray-400 font-semibold text-sm">請在右側選擇照片或自行上傳</div>
+                      </div>
+                    </div>
+
+                    <!-- 選項與表單 -->
+                    <div class="space-y-6">
+                      <!-- 預設照片選擇 -->
+                      <div>
+                        <label class="block text-sm font-bold text-gray-700 mb-2">⭐ 使用專業預設美照 (快速發送)</label>
+                        <div class="space-y-2">
+                          <button v-for="preset in presetPhotos" :key="preset.name"
+                            @click="selectPreset(preset.url)"
+                            :class="['w-full text-left px-4 py-2.5 rounded-lg border text-sm font-semibold transition', reportPhoto === preset.url ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-gray-200 hover:bg-gray-50']">
+                            {{ preset.name }}
+                          </button>
+                        </div>
+                      </div>
+
+                      <!-- 實體上傳 -->
+                      <div>
+                        <label class="block text-sm font-bold text-gray-700 mb-2">📤 上傳真實照片 (支援手機拍照)</label>
+                        <input type="file" ref="fileInput" @change="handleFileUpload" accept="image/*"
+                          class="w-full border-gray-300 rounded-lg p-2.5 border bg-gray-50 text-xs">
+                        <p class="text-xs text-gray-400 mt-1">選取手機相簿或直接開啟相機拍照，系統會自動轉換並送出！</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 狀態文字欄位 -->
+                  <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">💬 毛孩今日狀態備註</label>
+                    <textarea v-model="reportMessage" rows="3" placeholder="請輸入毛孩目前狀態，例如：今天洗完香香囉，吹風的時候超級乖，還吃了好多小零食！" 
+                      class="w-full border-gray-300 rounded-lg p-4 border focus:ring-orange-500 focus:border-orange-500 transition shadow-sm"></textarea>
+                  </div>
+
+                  <!-- 提交按鈕 -->
+                  <div class="flex justify-end pt-4 border-t">
+                    <button @click="submitReport" :disabled="isLoading || !selectedBookingId"
+                      class="bg-orange-500 text-white px-10 py-4 rounded-xl font-bold hover:bg-orange-600 disabled:opacity-50 transition shadow-md hover:shadow-lg flex items-center">
+                      <span v-if="isLoading" class="animate-spin mr-2">⏳</span>
+                      🚀 發送照片回報並推播通知飼主
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+            </main>
+          </div>
+        `,
+      }).mount('#app');
+    </script>
+  </body>
+</html>

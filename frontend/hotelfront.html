@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>線上預約安親 - PetHotel Pro</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+
+    <style>
+      .animate-fade-in {
+        animation: fadeIn 0.4s ease-in-out;
+      }
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    </style>
+  </head>
+  <body class="bg-orange-50 font-sans text-gray-800">
+    <div id="app"></div>
+
+    <script>
+      const { createApp, ref, computed, onMounted } = Vue;
+
+      createApp({
+        setup() {
+          const currentStep = ref(1);
+          const steps = [
+            { id: 1, title: '選擇日期' },
+            { id: 2, title: '選擇房型' },
+            { id: 3, title: '安親表單' },
+            { id: 4, title: '完成預約' },
+          ];
+
+          const bookingData = ref({
+            serviceType: 'boarding', // 'boarding', 'daycare', 'grooming'
+            checkIn: '',
+            checkOut: '',
+            roomId: null,
+            petName: '',
+            notes: '',
+            daycareDuration: 'half_day', // 'half_day', 'full_day'
+            groomingPackage: 'basic',    // 'basic', 'full', 'spa'
+            timeSlot: 'afternoon',       // 'morning', 'afternoon', 'evening'
+          });
+
+          const availableRooms = ref([
+            { id: 'R01', name: '標準喵星艙', desc: '適合 5kg 以下貓咪，含貓砂盆與獨立通風。', price: 600 },
+            { id: 'R02', name: '豪華汪星庭院', desc: '適合中大型犬，每日兩次散步服務。', price: 1200 },
+            { id: 'R03', name: '尊爵寵物套房', desc: '24小時監視器，APP隨時觀看，專屬保母。', price: 1800 },
+          ]);
+
+          const isLoggedIn = ref(false);
+          const isLoading = ref(false);
+          const errorMessage = ref('');
+          
+          // 串接後端建立的紀錄
+          const createdBooking = ref(null);
+          const createdPayment = ref(null);
+          const isPaid = ref(false);
+
+          // 即時照護照片回報推播相關變數
+          const reports = ref([]);
+          const activeNotification = ref(null);
+          const showReportModal = ref(false);
+          const selectedReport = ref(null);
+
+          const openReportDetail = (report) => {
+            selectedReport.value = report;
+            showReportModal.value = true;
+            activeNotification.value = null; // 點開後關閉推播通知卡片
+          };
+
+          onMounted(() => {
+            // 檢查是否登入
+            isLoggedIn.value = !!localStorage.getItem('access_token');
+
+            // 載入未完成的預約進度
+            const saved = sessionStorage.getItem('pending_booking');
+            if (saved) {
+              try {
+                bookingData.value = JSON.parse(saved);
+                sessionStorage.removeItem('pending_booking');
+                // 如果已經登入，自動跳到第三步
+                if (isLoggedIn.value) {
+                  currentStep.value = 3;
+                }
+              } catch (e) {
+                console.error("載入進度失敗", e);
+              }
+            }
+
+            // 定期輪詢安親照片回報（每 4 秒）
+            setInterval(async () => {
+              if (createdBooking.value && currentStep.value === 4) {
+                try {
+                  const res = await fetch(`/api/booking/${createdBooking.value.id}/reports`, {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+                  });
+                  const data = await res.json();
+                  if (res.ok && data.reports && data.reports.length > reports.value.length) {
+                    const newReport = data.reports[0]; // 最新的在第一個
+                    reports.value = data.reports;
+                    
+                    // 顯示推播通知卡片
+                    activeNotification.value = {
+                      petName: bookingData.value.petName,
+                      message: newReport.message,
+                      photo: newReport.image_url,
+                      report: newReport
+                    };
+                    
+                    // 播放音效 (Web Audio API 蜂鳴音)
+                    try {
+                      const context = new (window.AudioContext || window.webkitAudioContext)();
+                      const osc = context.createOscillator();
+                      const gain = context.createGain();
+                      osc.connect(gain);
+                      gain.connect(context.destination);
+                      osc.type = "sine";
+                      osc.frequency.setValueAtTime(880, context.currentTime);
+                      gain.gain.setValueAtTime(0.1, context.currentTime);
+                      osc.start();
+                      gain.gain.exponentialRampToValueAtTime(0.01, context.currentTime + 0.3);
+                      osc.stop(context.currentTime + 0.3);
+                    } catch (soundErr) {
+                      console.log("音效播不出來沒關係", soundErr);
+                    }
+                  }
+                } catch (err) {
+                  console.error("輪詢回報失敗", err);
+                }
+              }
+            }, 4000);
+          });
+
+          // 計算預約天數與總金額
+          const totalDays = computed(() => {
+            if (bookingData.value.serviceType !== 'boarding') return 1;
+            if (!bookingData.value.checkIn || !bookingData.value.checkOut) return 0;
+            const start = new Date(bookingData.value.checkIn);
+            const end = new Date(bookingData.value.checkOut);
+            const diffTime = end - start;
+            if (diffTime <= 0) return 0;
+            return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          });
+
+          const selectedRoom = computed(() => {
+            if (bookingData.value.serviceType === 'boarding') {
+              return availableRooms.value.find(r => r.id === bookingData.value.roomId) || null;
+            } else if (bookingData.value.serviceType === 'daycare') {
+              return { name: bookingData.value.roomId === 'daycare_R01' ? '陽光貓草樂園' : '萌犬奔跑草皮' };
+            } else if (bookingData.value.serviceType === 'grooming') {
+              return { name: bookingData.value.roomId === 'groomer_R02' ? '總監大師 Kevin 造型室' : '新秀造型師莉莉造型室' };
+            }
+            return null;
+          });
+
+          const totalAmount = computed(() => {
+            if (bookingData.value.serviceType === 'boarding') {
+              if (!selectedRoom.value || totalDays.value <= 0) return 0;
+              return totalDays.value * selectedRoom.value.price;
+            } else if (bookingData.value.serviceType === 'daycare') {
+              const base = bookingData.value.daycareDuration === 'half_day' ? 300 : 500;
+              return base;
+            } else if (bookingData.value.serviceType === 'grooming') {
+              let base = 500;
+              if (bookingData.value.groomingPackage === 'full') base = 1200;
+              if (bookingData.value.groomingPackage === 'spa') base = 2000;
+              if (bookingData.value.roomId === 'groomer_R02') base += 200; // 總監加值
+              return base;
+            }
+            return 0;
+          });
+
+          const nextStep = () => {
+            if (currentStep.value < 4) currentStep.value++;
+          };
+
+          const handleStep1Next = () => {
+            if (bookingData.value.serviceType !== 'boarding') {
+              // 對於安親與美容，把退房日期設為與入住同一天以滿足資料庫外鍵欄位要求
+              bookingData.value.checkOut = bookingData.value.checkIn;
+            }
+            nextStep();
+          };
+          
+          const prevStep = () => {
+            if (currentStep.value > 1) currentStep.value--;
+          };
+
+          // 第三步前的身份驗證檢查
+          const checkLoginBeforeStep3 = () => {
+            if (!isLoggedIn.value) {
+              // 尚未登入，將預約進度暫存至 sessionStorage，並導引至登入頁面
+              sessionStorage.setItem('pending_booking', JSON.stringify(bookingData.value));
+              window.location.href = './login.html';
+            } else {
+              nextStep();
+            }
+          };
+
+          // 提交預約單與建立模擬付款單
+          const submitBooking = async () => {
+            isLoading.value = true;
+            errorMessage.value = '';
+
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+              errorMessage.value = '登入已過期，請重新登入';
+              isLoggedIn.value = false;
+              isLoading.value = false;
+              return;
+            }
+
+            try {
+              // 1. 呼叫後端建立預約
+              const bookingRes = await fetch('/api/booking/', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(bookingData.value)
+              });
+
+              const bookingResult = await bookingRes.json();
+
+              if (!bookingRes.ok) {
+                throw new Error(bookingResult.error || '預約失敗，請確認日期是否正確');
+              }
+
+              createdBooking.value = bookingResult.booking;
+
+              // 2. 自動呼叫後端建立付款單
+              const paymentRes = await fetch('/api/payment/create', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                  booking_id: createdBooking.value.id,
+                  amount_twd: totalAmount.value,
+                  provider: 'manual'
+                })
+              });
+
+              const paymentResult = await paymentRes.json();
+
+              if (paymentRes.ok) {
+                createdPayment.value = paymentResult.payment;
+              }
+
+              // 前往步驟 4
+              nextStep();
+            } catch (err) {
+              errorMessage.value = err.message || '伺服器連線失敗，請稍後再試';
+            } finally {
+              isLoading.value = false;
+            }
+          };
+
+          // 模擬付款流程
+          const handlePayment = async () => {
+            if (!createdPayment.value) return;
+            isLoading.value = true;
+            errorMessage.value = '';
+
+            const token = localStorage.getItem('access_token');
+
+            try {
+              const res = await fetch('/api/payment/mark-paid', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                  payment_id: createdPayment.value.id
+                })
+              });
+
+              const result = await res.json();
+
+              if (res.ok) {
+                isPaid.value = true;
+                createdPayment.value.status = 'paid';
+              } else {
+                throw new Error(result.error || '付款失敗');
+              }
+            } catch (err) {
+              errorMessage.value = err.message || '付款串接失敗';
+            } finally {
+              isLoading.value = false;
+            }
+          };
+
+          const handleLogout = () => {
+            localStorage.removeItem('access_token');
+            isLoggedIn.value = false;
+            window.location.href = './index.html';
+          };
+
+           return {
+            currentStep,
+            steps,
+            bookingData,
+            availableRooms,
+            isLoggedIn,
+            isLoading,
+            errorMessage,
+            createdBooking,
+            createdPayment,
+            isPaid,
+            totalDays,
+            selectedRoom,
+            totalAmount,
+            nextStep,
+            handleStep1Next,
+            prevStep,
+            checkLoginBeforeStep3,
+            submitBooking,
+            handlePayment,
+            handleLogout,
+            // 照片回報推播相關
+            reports,
+            activeNotification,
+            showReportModal,
+            selectedReport,
+            openReportDetail
+          };
+        },
+        template: `
+          <div class="min-h-screen bg-orange-50 font-sans text-gray-800">
+            <header class="bg-white shadow-sm sticky top-0 z-10">
+              <div class="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+                <a href="./index.html" class="text-2xl font-extrabold text-orange-600 hover:text-orange-700 transition">🐾 PetHotel Pro</a>
+                <nav class="space-x-4 flex items-center text-sm font-medium">
+                  <a href="./index.html" class="text-gray-600 hover:text-orange-500">首頁</a>
+                  
+                  <span v-if="isLoggedIn" class="text-gray-500">已登入</span>
+                  <button v-if="isLoggedIn" @click="handleLogout" class="text-red-500 hover:text-red-700">登出</button>
+                  <a v-else href="./login.html" class="bg-orange-500 text-white px-4 py-2 rounded-full hover:bg-orange-600 transition">會員登入</a>
+                </nav>
+              </div>
+            </header>
+
+            <main class="max-w-4xl mx-auto px-4 py-8">
+              <!-- 步驟導覽器 -->
+              <div class="flex justify-between items-center mb-10 relative">
+                <div class="absolute left-0 top-1/2 transform -translate-y-1/2 w-full h-1 bg-gray-200 -z-10"></div>
+                <div v-for="s in steps" :key="s.id" class="flex flex-col items-center bg-orange-50 px-2">
+                  <div :class="['w-10 h-10 rounded-full flex items-center justify-center font-bold text-white mb-2 transition-colors', currentStep >= s.id ? 'bg-orange-500' : 'bg-gray-300']">
+                    {{ s.id }}
+                  </div>
+                  <span :class="['text-sm font-bold', currentStep >= s.id ? 'text-orange-600' : 'text-gray-400']">{{ s.title }}</span>
+                </div>
+              </div>
+
+              <!-- 主控制面板 -->
+              <div class="bg-white rounded-2xl shadow-xl p-6 md:p-10">
+                
+                <!-- 錯誤訊息提示 -->
+                <div v-if="errorMessage" class="mb-6 p-4 bg-red-50 border-l-4 border-red-500 text-red-700 text-sm">
+                  {{ errorMessage }}
+                </div>
+
+                <!-- 步驟 1: 選擇日期與服務項目 -->
+                <section v-if="currentStep === 1" class="animate-fade-in">
+                  <h2 class="text-2xl font-bold mb-6 border-l-4 border-orange-500 pl-3">選擇預約服務與日期</h2>
+                  
+                  <!-- 服務類型選擇區 -->
+                  <div class="mb-8">
+                    <label class="block text-sm font-extrabold text-gray-700 mb-3">🔍 選擇您需要的服務項目</label>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <!-- 住宿卡片 -->
+                      <div @click="bookingData.serviceType = 'boarding'" 
+                        :class="['border-2 rounded-2xl p-4 cursor-pointer transition transform hover:-translate-y-0.5', bookingData.serviceType === 'boarding' ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-orange-200']">
+                        <div class="text-3xl mb-2">🏨</div>
+                        <h4 class="font-extrabold text-base mb-1">寵物住宿 (Boarding)</h4>
+                        <p class="text-xs text-gray-500">適合多日外宿。含全天安親照護、高級個人客房與頂級關懷。</p>
+                      </div>
+                      <!-- 安親卡片 -->
+                      <div @click="bookingData.serviceType = 'daycare'" 
+                        :class="['border-2 rounded-2xl p-4 cursor-pointer transition transform hover:-translate-y-0.5', bookingData.serviceType === 'daycare' ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-orange-200']">
+                        <div class="text-3xl mb-2">🍼</div>
+                        <h4 class="font-extrabold text-base mb-1">寵物安親 (Daycare)</h4>
+                        <p class="text-xs text-gray-500">適合單日短時間託管。半日或全日，保母溫馨遊戲伴玩。</p>
+                      </div>
+                      <!-- 美容卡片 -->
+                      <div @click="bookingData.serviceType = 'grooming'" 
+                        :class="['border-2 rounded-2xl p-4 cursor-pointer transition transform hover:-translate-y-0.5', bookingData.serviceType === 'grooming' ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-orange-200']">
+                        <div class="text-3xl mb-2">✂️</div>
+                        <h4 class="font-extrabold text-base mb-1">精緻美容 (Grooming)</h4>
+                        <p class="text-xs text-gray-500">專業美容師一對一沐浴。可預約上午/下午/晚上時段。</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 住宿時間選擇 -->
+                  <div v-if="bookingData.serviceType === 'boarding'" class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 animate-fade-in">
+                    <div>
+                      <label class="block text-sm font-bold text-gray-700 mb-2">入住日期 (Check-in)</label>
+                      <input type="date" v-model="bookingData.checkIn" class="w-full border-gray-300 rounded-lg shadow-sm focus:border-orange-500 focus:ring-orange-500 p-3 border">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-bold text-gray-700 mb-2">退房日期 (Check-out)</label>
+                      <input type="date" v-model="bookingData.checkOut" class="w-full border-gray-300 rounded-lg shadow-sm focus:border-orange-500 focus:ring-orange-500 p-3 border">
+                    </div>
+                  </div>
+                  <div v-if="bookingData.serviceType === 'boarding' && totalDays > 0" class="mb-6 p-4 bg-orange-50 rounded-lg text-orange-800 text-sm font-bold">
+                    📅 您共選擇了： {{ totalDays }} 晚
+                  </div>
+
+                  <!-- 安親時間與時數選擇 -->
+                  <div v-if="bookingData.serviceType === 'daycare'" class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 animate-fade-in">
+                    <div>
+                      <label class="block text-sm font-bold text-gray-700 mb-2">預約安親日期</label>
+                      <input type="date" v-model="bookingData.checkIn" class="w-full border-gray-300 rounded-lg shadow-sm focus:border-orange-500 focus:ring-orange-500 p-3 border">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-bold text-gray-700 mb-2">預約安親時數方案</label>
+                      <select v-model="bookingData.daycareDuration" class="w-full border-gray-300 rounded-lg p-3 border focus:ring-orange-500">
+                        <option value="half_day">半日安親 4 小時 (NT$ 300)</option>
+                        <option value="full_day">全日安親 8 小時 (NT$ 500)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <!-- 美容時間與方案選擇 -->
+                  <div v-if="bookingData.serviceType === 'grooming'" class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 animate-fade-in">
+                    <div>
+                      <label class="block text-sm font-bold text-gray-700 mb-2">預約美容日期</label>
+                      <input type="date" v-model="bookingData.checkIn" class="w-full border-gray-300 rounded-lg shadow-sm focus:border-orange-500 focus:ring-orange-500 p-3 border">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-bold text-gray-700 mb-2">預約美容時段</label>
+                      <select v-model="bookingData.timeSlot" class="w-full border-gray-300 rounded-lg p-3 border focus:ring-orange-500">
+                        <option value="morning">上午時段 (09:00 - 12:00)</option>
+                        <option value="afternoon">下午時段 (13:00 - 17:00)</option>
+                        <option value="evening">晚上時段 (18:00 - 21:00)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-sm font-bold text-gray-700 mb-2">美容洗剪套裝方案</label>
+                      <select v-model="bookingData.groomingPackage" class="w-full border-gray-300 rounded-lg p-3 border focus:ring-orange-500">
+                        <option value="basic">基礎護理洗香香 (NT$ 500)</option>
+                        <option value="full">專業全身造型修剪 (NT$ 1200)</option>
+                        <option value="spa">頂級死海泥奢華 SPA (NT$ 2000)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="flex justify-end">
+                    <button @click="handleStep1Next" :disabled="!bookingData.checkIn || (bookingData.serviceType === 'boarding' && (!bookingData.checkOut || totalDays <= 0))" class="bg-orange-500 text-white px-8 py-3 rounded-lg font-bold hover:bg-orange-600 disabled:opacity-50 transition">下一步：選擇房型/照護師 ➔</button>
+                  </div>
+                </section>
+
+                <!-- 步驟 2: 選擇房型 / 照護空間 -->
+                <section v-if="currentStep === 2" class="animate-fade-in">
+                  <h2 class="text-2xl font-bold mb-6 border-l-4 border-orange-500 pl-3">
+                    {{ bookingData.serviceType === 'boarding' ? '目前空房列表' : bookingData.serviceType === 'daycare' ? '選擇安親專屬園區' : '選擇您的專屬造型師' }}
+                  </h2>
+                  
+                  <!-- 1. 住宿房型選擇 -->
+                  <div v-if="bookingData.serviceType === 'boarding'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+                    <div v-for="room in availableRooms" :key="room.id"
+                      @click="bookingData.roomId = room.id"
+                      :class="['border-2 rounded-xl p-4 cursor-pointer transition transform hover:-translate-y-1', bookingData.roomId === room.id ? 'border-orange-500 bg-orange-50' : 'border-gray-200']">
+                      <div class="h-32 bg-orange-100 rounded-lg mb-4 flex items-center justify-center text-orange-500 font-bold text-4xl">🏨</div>
+                      <h3 class="text-lg font-bold mb-1">{{ room.name }}</h3>
+                      <p class="text-sm text-gray-500 mb-3">{{ room.desc }}</p>
+                      <div class="text-orange-600 font-extrabold text-xl">NT$ {{ room.price }} / 晚</div>
+                    </div>
+                  </div>
+
+                  <!-- 2. 安親園區選擇 -->
+                  <div v-if="bookingData.serviceType === 'daycare'" class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
+                    <div @click="bookingData.roomId = 'daycare_R01'" 
+                      :class="['border-2 rounded-xl p-4 cursor-pointer transition transform hover:-translate-y-1', bookingData.roomId === 'daycare_R01' ? 'border-orange-500 bg-orange-50' : 'border-gray-200']">
+                      <div class="h-32 bg-orange-100 rounded-lg mb-4 flex items-center justify-center text-4xl">🐾</div>
+                      <h3 class="text-lg font-bold mb-1">陽光貓草樂園</h3>
+                      <p class="text-sm text-gray-500 mb-3">大型通風採光遊樂區，含多層貓跳台、逗貓棒與貓薄荷派對。</p>
+                      <div class="text-orange-600 font-extrabold text-xl">NT$ 0 (免加價)</div>
+                    </div>
+                    <div @click="bookingData.roomId = 'daycare_R02'" 
+                      :class="['border-2 rounded-xl p-4 cursor-pointer transition transform hover:-translate-y-1', bookingData.roomId === 'daycare_R02' ? 'border-orange-500 bg-orange-50' : 'border-gray-200']">
+                      <div class="h-32 bg-orange-100 rounded-lg mb-4 flex items-center justify-center text-4xl">🥎</div>
+                      <h3 class="text-lg font-bold mb-1">萌犬奔跑草皮</h3>
+                      <p class="text-sm text-gray-500 mb-3">安全圍網戶外陽光草皮，有專業保母帶領互動、拋接飛盤球。</p>
+                      <div class="text-orange-600 font-extrabold text-xl">NT$ 0 (免加價)</div>
+                    </div>
+                  </div>
+
+                  <!-- 3. 美容師選擇 -->
+                  <div v-if="bookingData.serviceType === 'grooming'" class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
+                    <div @click="bookingData.roomId = 'groomer_R01'" 
+                      :class="['border-2 rounded-xl p-4 cursor-pointer transition transform hover:-translate-y-1', bookingData.roomId === 'groomer_R01' ? 'border-orange-500 bg-orange-50' : 'border-gray-200']">
+                      <div class="h-32 bg-orange-100 rounded-lg mb-4 flex items-center justify-center text-4xl">✂️</div>
+                      <h3 class="text-lg font-bold mb-1">新秀造型師莉莉</h3>
+                      <p class="text-sm text-gray-500 mb-3">溫柔有耐心，特別呵護怕水、高敏感貓犬，擅長可愛圓頭日系造型。</p>
+                      <div class="text-orange-600 font-extrabold text-xl">NT$ 0 (免加價)</div>
+                    </div>
+                    <div @click="bookingData.roomId = 'groomer_R02'" 
+                      :class="['border-2 rounded-xl p-4 cursor-pointer transition transform hover:-translate-y-1', bookingData.roomId === 'groomer_R02' ? 'border-orange-500 bg-orange-50' : 'border-gray-200']">
+                      <div class="h-32 bg-orange-100 rounded-lg mb-4 flex items-center justify-center text-4xl">🏆</div>
+                      <h3 class="text-lg font-bold mb-1">總監級大師 Kevin</h3>
+                      <p class="text-sm text-gray-500 mb-3">國際寵物大賽造型金獎得主，專攻賽級吹線與精細貴賓剪修。</p>
+                      <div class="text-orange-600 font-extrabold text-xl">+ NT$ 200 (指定費)</div>
+                    </div>
+                  </div>
+
+                  <div v-if="totalAmount > 0" class="mb-6 p-4 bg-orange-50 rounded-lg text-orange-800 text-sm font-bold flex justify-between">
+                    <span>💡 選擇：{{ selectedRoom?.name }}</span>
+                    <span>💰 估計總金額：NT$ {{ totalAmount }}</span>
+                  </div>
+
+                  <div class="flex justify-between">
+                    <button @click="prevStep" class="text-gray-500 font-bold hover:text-gray-700">⬅ 返回修改日期</button>
+                    <button @click="checkLoginBeforeStep3" :disabled="!bookingData.roomId" class="bg-orange-500 text-white px-8 py-3 rounded-lg font-bold hover:bg-orange-600 disabled:opacity-50 transition">
+                      {{ isLoggedIn ? '下一步：填寫資料 ➔' : '🔑 登入以填寫資料 ➔' }}
+                    </button>
+                  </div>
+                </section>
+
+                <!-- 步驟 3: 安親表單 -->
+                <section v-if="currentStep === 3" class="animate-fade-in">
+                  <h2 class="text-2xl font-bold mb-6 border-l-4 border-orange-500 pl-3">填寫毛孩表單與疫苗資訊</h2>
+                  <div class="space-y-6 mb-8">
+                    <div>
+                      <label class="block text-sm font-bold text-gray-700 mb-2">寵物姓名</label>
+                      <input type="text" v-model="bookingData.petName" placeholder="例如：大黃" class="w-full border-gray-300 rounded-lg p-3 border focus:ring-orange-500">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-bold text-gray-700 mb-2">上傳最新狂犬病與綜合疫苗證明 (必填)</label>
+                      <!-- 模擬上傳，點選即可 -->
+                      <input type="file" class="w-full border-gray-300 rounded-lg p-3 border bg-gray-50 text-sm">
+                      <p class="text-xs text-red-500 mt-1">* 系統將自動進行疫苗核檢，若未通過將轉交人工審核。</p>
+                    </div>
+                    <div>
+                      <label class="block text-sm font-bold text-gray-700 mb-2">特殊飲食、美容偏好或照護備註</label>
+                      <textarea v-model="bookingData.notes" rows="3" placeholder="例如：對雞肉過敏、每天需定時餵藥、耳朵處剪圓一些..." class="w-full border-gray-300 rounded-lg p-3 border focus:ring-orange-500"></textarea>
+                    </div>
+                  </div>
+
+                  <div class="p-6 border border-orange-100 rounded-2xl bg-orange-50/50 mb-8">
+                    <h3 class="text-lg font-bold mb-3">📋 預約內容明細</h3>
+                    <div class="grid grid-cols-2 gap-4 text-sm">
+                      <div><span class="text-gray-500">預約項目：</span>
+                        <span class="font-extrabold text-orange-600">
+                          {{ bookingData.serviceType === 'boarding' ? '🏨 寵物住宿' : bookingData.serviceType === 'daycare' ? '🍼 寵物安親' : '✂️ 精緻美容' }}
+                        </span>
+                      </div>
+                      <div><span class="text-gray-500">日期時間：</span>{{ bookingData.checkIn }} {{ bookingData.serviceType === 'boarding' ? '至 ' + bookingData.checkOut : '' }}</div>
+                      <div><span class="text-gray-500">安排選擇：</span>{{ selectedRoom?.name }}</div>
+                      <div><span class="text-gray-500">方案內容：</span>
+                        <span>
+                          {{ bookingData.serviceType === 'boarding' ? totalDays + ' 晚住宿' : bookingData.serviceType === 'daycare' ? (bookingData.daycareDuration === 'half_day' ? '半日安親 4H' : '全日安親 8H') : (bookingData.groomingPackage === 'basic' ? '基礎洗香香' : bookingData.groomingPackage === 'full' ? '造型造型修剪' : '死海泥 SPA') }}
+                        </span>
+                      </div>
+                      <div class="col-span-2 text-right text-lg font-extrabold text-orange-600">應付訂金總額：NT$ {{ totalAmount }}</div>
+                    </div>
+                  </div>
+
+                  <div class="flex justify-between">
+                    <button @click="prevStep" class="text-gray-500 font-bold hover:text-gray-700" :disabled="isLoading">⬅ 返回選擇房型</button>
+                    <button @click="submitBooking" :disabled="!bookingData.petName || isLoading" class="bg-orange-500 text-white px-8 py-3 rounded-lg font-bold hover:bg-orange-600 disabled:opacity-50 transition flex items-center">
+                      <span v-if="isLoading" class="animate-spin mr-2">⏳</span>
+                      {{ isLoading ? '建立訂單中...' : '確認無誤，送出預約 ➔' }}
+                    </button>
+                  </div>
+                </section>
+
+                <!-- 步驟 4: 完成預約 / 模擬付款 -->
+                <section v-if="currentStep === 4" class="text-center py-10 animate-fade-in">
+                  <div class="w-20 h-20 bg-green-100 text-green-500 rounded-full flex items-center justify-center mx-auto mb-6 text-4xl font-bold">
+                    ✓
+                  </div>
+                  <h2 class="text-3xl font-extrabold text-gray-800 mb-4">預約已順利送出！</h2>
+                  
+                  <div class="max-w-md mx-auto bg-gray-50 border border-gray-200 rounded-2xl p-6 text-left mb-8 space-y-3">
+                    <h3 class="font-bold text-lg text-gray-700 text-center border-b pb-2">📦 預約單資訊</h3>
+                    <div><span class="text-gray-500">預約單編號：</span><span class="font-mono font-bold">#{{ createdBooking?.id }}</span></div>
+                    <div><span class="text-gray-500">寵物姓名：</span><span class="font-bold">{{ bookingData.petName }}</span></div>
+                    <div><span class="text-gray-500">預約期間：</span>{{ bookingData.checkIn }} 至 {{ bookingData.checkOut }} ({{ totalDays }} 晚)</div>
+                    <div><span class="text-gray-500">房型名稱：</span>{{ selectedRoom?.name }}</div>
+                    <div><span class="text-gray-500">應付總額：</span><span class="text-orange-600 font-extrabold">NT$ {{ totalAmount }}</span></div>
+                    <div class="flex items-center justify-between border-t pt-3 mt-3">
+                      <span class="font-bold">付款狀態：</span>
+                      <span :class="['px-3 py-1 rounded-full text-xs font-extrabold border', isPaid ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200']">
+                        {{ isPaid ? '已付清' : '未付款' }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div v-if="!isPaid" class="space-y-4 max-w-sm mx-auto">
+                    <button @click="handlePayment" :disabled="isLoading" class="w-full bg-green-500 text-white py-3.5 rounded-xl font-bold hover:bg-green-600 transition shadow-md hover:shadow-lg flex items-center justify-center">
+                      <span v-if="isLoading" class="animate-spin mr-2">⏳</span>
+                      💳 立即模擬線上付款 (NT$ {{ totalAmount }})
+                    </button>
+                    <p class="text-xs text-gray-500">
+                      * 提醒：本系統為展示用，付款為模擬交易，不會扣除您的真實資金。
+                    </p>
+                  </div>
+                  
+                  <div v-else class="max-w-sm mx-auto space-y-4">
+                    <div class="p-4 bg-green-50 border-2 border-green-200 rounded-xl text-green-800 text-sm font-bold">
+                      🎉 模擬付款成功！我們會儘速審核您的疫苗資訊。
+                    </div>
+                    <a href="./index.html" class="inline-block w-full border-2 border-orange-500 text-orange-500 py-3 rounded-xl font-bold hover:bg-orange-50 transition">
+                      返回首頁
+                    </a>
+                  </div>
+                </section>
+              </div>
+            </main>
+
+            <!-- 右上角即時推播通知卡片 -->
+            <div v-if="activeNotification" 
+              class="fixed top-20 right-5 z-50 max-w-sm w-full bg-white/95 backdrop-blur rounded-2xl shadow-2xl border border-orange-200 p-4 animate-fade-in flex items-start gap-4 cursor-pointer hover:shadow-orange-100 transition transform hover:-translate-y-0.5"
+              @click="openReportDetail(activeNotification.report)">
+              <div class="w-12 h-12 bg-orange-100 rounded-full flex-shrink-0 flex items-center justify-center text-2xl">
+                🐾
+              </div>
+              <div class="flex-1 min-w-0">
+                <h4 class="font-extrabold text-orange-600 text-sm flex justify-between">
+                  <span>新的安親照護回報！</span>
+                  <button @click.stop="activeNotification = null" class="text-gray-400 hover:text-gray-600">✕</button>
+                </h4>
+                <p class="text-xs text-gray-500 mt-0.5 font-bold">您的寶貝 {{ activeNotification.petName }} 有新狀態囉！</p>
+                <p class="text-sm text-gray-700 mt-2 truncate font-medium">💬 {{ activeNotification.message }}</p>
+                <div class="mt-3 flex items-center gap-2 text-xs text-orange-500 font-extrabold">
+                  <span>點選查看美容照片 ➔</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 照片回報詳情彈窗 -->
+            <div v-if="showReportModal && selectedReport" 
+              class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+              @click="showReportModal = false">
+              <div class="bg-white rounded-3xl overflow-hidden shadow-2xl max-w-lg w-full animate-fade-in" @click.stop>
+                <div class="relative h-72 md:h-96 bg-gray-100">
+                  <img :src="selectedReport.image_url" class="w-full h-full object-cover">
+                  <button @click="showReportModal = false" 
+                    class="absolute top-4 right-4 w-10 h-10 bg-black/50 text-white rounded-full flex items-center justify-center hover:bg-black/70 transition font-bold">
+                    ✕
+                  </button>
+                </div>
+                <div class="p-6 md:p-8 space-y-4">
+                  <div class="flex justify-between items-center border-b pb-3">
+                    <h3 class="text-2xl font-extrabold text-gray-800">🐾 毛孩生活照護回報</h3>
+                    <span class="text-xs text-gray-400 font-mono">{{ new Date(selectedReport.created_at).toLocaleString() }}</span>
+                  </div>
+                  <p class="text-gray-700 font-medium leading-relaxed bg-orange-50/50 p-4 rounded-2xl border border-orange-100">
+                    💬 {{ selectedReport.message }}
+                  </p>
+                  <div class="flex justify-end">
+                    <button @click="showReportModal = false" class="bg-orange-500 text-white px-6 py-2.5 rounded-full font-bold hover:bg-orange-600 transition">
+                      看完了，太貼心了！❤️
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        `,
+      }).mount('#app');
+    </script>
+  </body>
+</html>

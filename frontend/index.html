@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PetHotel Pro｜寵物安親旅館</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <style>
+      .animate-fade-in { animation: fadeIn 0.35s ease-in-out; }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      html { scroll-behavior: smooth; }
+    </style>
+  </head>
+  <body class="bg-orange-50 text-gray-800">
+    <div id="app"></div>
+
+    <script>
+      const { createApp, computed, ref, onMounted } = Vue;
+
+      createApp({
+        setup() {
+          const mobileMenuOpen = ref(false);
+          const year = computed(() => new Date().getFullYear());
+
+          // ── 最新消息 ──
+          const news = [
+            {
+              date: '2026-06-01',
+              tag: '公告',
+              tagColor: 'bg-blue-100 text-blue-700',
+              title: '端午連假（6/8–6/10）房間已開放預約',
+              body: '連假期間床位有限，建議提早登入系統完成預約，以免向隅。',
+            },
+            {
+              date: '2026-05-20',
+              tag: '新服務',
+              tagColor: 'bg-emerald-100 text-emerald-700',
+              title: '寵物美容服務正式上線',
+              body: '洗澡、剪毛、造型一站完成。可於預約住宿時一併選購，或單獨預約美容時段。',
+            },
+            {
+              date: '2026-05-10',
+              tag: '公告',
+              tagColor: 'bg-blue-100 text-blue-700',
+              title: '疫苗查核系統升級',
+              body: '系統現已自動驗證狂犬病與混合疫苗有效期，過期或缺件將無法完成預約，請事先備妥。',
+            },
+          ];
+
+          // ── 優惠促銷 ──
+          const promos = [
+            {
+              emoji: '🎉',
+              label: '限時',
+              labelColor: 'bg-red-100 text-red-600',
+              title: '首次預約 9 折',
+              desc: '新顧客首次完成預約並入住，住宿費用享 9 折優惠。',
+              expiry: '2026-07-31',
+              code: 'NEW10',
+            },
+            {
+              emoji: '📅',
+              label: '長住優惠',
+              labelColor: 'bg-amber-100 text-amber-700',
+              title: '連住 5 晚送 1 晚',
+              desc: '一次預約 5 晚（同一寵物、連續日期），第 6 晚免費。',
+              expiry: '長期有效',
+              code: 'STAY5',
+            },
+            {
+              emoji: '✂️',
+              label: '組合',
+              labelColor: 'bg-violet-100 text-violet-700',
+              title: '住宿 + 美容套餐 85 折',
+              desc: '同時預約住宿與美容服務，套餐總價享 85 折。',
+              expiry: '2026-08-31',
+              code: 'GROOM85',
+            },
+          ];
+
+          // ── 服務規定 ──
+          const rules = [
+            {
+              icon: '💉',
+              title: '疫苗規定',
+              items: [
+                '狂犬病疫苗：有效期內（含入住當日）',
+                '混合疫苗（五合一或七合一）：有效期內',
+                '疫苗過期或未提供 → 系統自動擋關，無法完成預約',
+                '如有特殊狀況（幼犬貓未滿接種月齡），請來電說明',
+              ],
+            },
+            {
+              icon: '🕐',
+              title: '入退住時間',
+              items: [
+                '入住（Check-in）：12:00 – 19:00',
+                '退房（Check-out）：10:00 – 18:00',
+                '提前/延後需提前電話確認，可能酌收費用',
+                '超時未取，每小時加收 $100',
+              ],
+            },
+            {
+              icon: '🐾',
+              title: '寵物條件',
+              items: [
+                '限貓、犬（其他動物請事先來電詢問）',
+                '有攻擊紀錄或標記為「攻擊性」之寵物，無法接受安置',
+                '發情期母犬／貓建議穿著生理褲或提前告知',
+                '身體不適或正在服藥，請攜帶獸醫指示書',
+              ],
+            },
+            {
+              icon: '🧳',
+              title: '請自備物品',
+              items: [
+                '平日飼料（份量標示清楚，請勿混裝）',
+                '常備藥物（請標明用藥時間與劑量）',
+                '喜愛的玩具或毯子（有助緩解緊張）',
+                '疫苗證明正本或照片',
+              ],
+            },
+            {
+              icon: '❌',
+              title: '不接受情形',
+              items: [
+                '疫苗過期或無法提供證明',
+                '有傳染性疾病（皮膚病、犬瘟、貓鼻支等）',
+                '嚴重行為問題（高度攻擊、自傷）',
+                '未絕育且發情中（公犬）',
+              ],
+            },
+            {
+              icon: '💳',
+              title: '取消與退費',
+              items: [
+                '入住前 72 小時取消：全額退款',
+                '入住前 24–72 小時取消：退 50%',
+                '入住前 24 小時內取消：不退款',
+                '疫苗問題導致無法入住：全額退款',
+              ],
+            },
+          ];
+
+          const features = [
+            { title: '安心把關', desc: '進住前疫苗/健康資料核檢，並提供透明的照護紀錄與交接。' },
+            { title: '舒適空間', desc: '獨立通風與定時消毒，乾淨不混味；房型依體型與性格分區。' },
+            { title: '即時掌握', desc: '可選擇影像/訊息回報頻率，讓你不在身邊也能放心。' },
+          ];
+
+          const roomHighlights = [
+            { name: '標準喵星艙', price: 600, tag: '小型貓' },
+            { name: '豪華汪星庭院', price: 1200, tag: '中大型犬' },
+            { name: '尊爵寵物套房', price: 1800, tag: '尊享服務' },
+          ];
+
+          const faqs = [
+            { q: '需要什麼疫苗證明？', a: '一般需提供狂犬病與綜合疫苗之有效證明。若狀態不明，系統會提示並轉人工確認。' },
+            { q: '可以先看房嗎？', a: '可以。你可以來店參觀或先用預約流程選擇日期/房型，了解可用房與價格。' },
+            { q: '付款怎麼做？', a: '送出預約申請後，核檢通過會寄出付款通知；收到後 24 小時內支付訂金即可保留房型。' },
+          ];
+
+          const activeFaq = ref(0);
+          const setActiveFaq = (idx) => { activeFaq.value = activeFaq.value === idx ? -1 : idx; };
+
+          const goBooking = () => { window.location.href = './hotelfront.html'; };
+
+          // ── 今日空房 ──
+          const rooms = ref([]);
+          const roomsLoading = ref(false);
+          const availableCount = computed(() => rooms.value.filter(r => r.status === 'available').length);
+
+          const fetchRooms = async () => {
+            roomsLoading.value = true;
+            try {
+              const res = await fetch('/api/room');
+              if (res.ok) {
+                const d = await res.json();
+                rooms.value = d.rooms;
+              }
+            } catch (e) {
+              console.error('無法取得房間資料', e);
+            } finally {
+              roomsLoading.value = false;
+            }
+          };
+
+          // 促銷倒數
+          const daysLeft = (expiry) => {
+            if (!expiry.includes('-')) return null;
+            const diff = Math.ceil((new Date(expiry) - new Date()) / 86400000);
+            return diff > 0 ? diff : 0;
+          };
+
+          onMounted(fetchRooms);
+
+          return {
+            mobileMenuOpen, year, news, promos, rules,
+            features, roomHighlights, faqs, activeFaq,
+            setActiveFaq, goBooking, daysLeft,
+            rooms, roomsLoading, availableCount, fetchRooms,
+          };
+        },
+
+        template: `
+          <div class="min-h-screen">
+
+            <!-- ── 導覽列 ── -->
+            <header class="bg-white/90 backdrop-blur shadow-sm sticky top-0 z-10">
+              <div class="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+                <a href="./index.html" class="flex items-center gap-2">
+                  <span class="text-2xl">🐾</span>
+                  <span class="text-xl md:text-2xl font-extrabold text-orange-600">PetHotel Pro</span>
+                </a>
+                <nav class="hidden md:flex items-center gap-5 text-sm font-semibold">
+                  <a href="./login.html" class="text-orange-600 hover:text-orange-700 font-extrabold border-r border-orange-200 pr-4">🔑 系統登入</a>
+                  <a href="#news"    class="text-gray-600 hover:text-orange-600">最新消息</a>
+                  <a href="#promos"  class="text-gray-600 hover:text-orange-600">優惠促銷</a>
+                  <a href="#rules"   class="text-gray-600 hover:text-orange-600">服務規定</a>
+                  <a href="#rooms"   class="text-gray-600 hover:text-orange-600">房型</a>
+                  <a href="#faq"     class="text-gray-600 hover:text-orange-600">常見問題</a>
+                  <button @click="goBooking" class="bg-orange-500 text-white px-4 py-2 rounded-full hover:bg-orange-600 transition">立即預約</button>
+                </nav>
+                <button class="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg hover:bg-orange-50"
+                  @click="mobileMenuOpen = !mobileMenuOpen">≡</button>
+              </div>
+              <div v-if="mobileMenuOpen" class="md:hidden border-t bg-white">
+                <div class="max-w-6xl mx-auto px-4 py-3 flex flex-col gap-3 text-sm font-semibold">
+                  <a href="./login.html" class="text-orange-600 font-extrabold border-b pb-2">🔑 系統登入</a>
+                  <a @click="mobileMenuOpen=false" href="#news">最新消息</a>
+                  <a @click="mobileMenuOpen=false" href="#promos">優惠促銷</a>
+                  <a @click="mobileMenuOpen=false" href="#rules">服務規定</a>
+                  <a @click="mobileMenuOpen=false" href="#rooms">房型</a>
+                  <a @click="mobileMenuOpen=false" href="#faq">常見問題</a>
+                  <button @click="goBooking" class="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 transition">立即預約</button>
+                </div>
+              </div>
+            </header>
+
+            <main class="max-w-6xl mx-auto px-4">
+
+              <!-- ── Hero ── -->
+              <section class="pt-10 md:pt-16 pb-12 md:pb-16 grid md:grid-cols-2 gap-10 items-start animate-fade-in">
+                <div>
+                  <div class="inline-flex items-center gap-2 bg-white border border-orange-100 rounded-full px-4 py-2 text-sm font-semibold text-orange-700">
+                    <span class="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>
+                    今日也要讓毛孩住得更安心
+                  </div>
+                  <h1 class="mt-5 text-4xl md:text-5xl font-extrabold leading-tight">
+                    寵物安親旅館<br />
+                    <span class="text-orange-600">舒服、透明、好放心</span>
+                  </h1>
+                  <p class="mt-4 text-gray-600 text-base md:text-lg leading-relaxed">
+                    從日期到房型、從疫苗到備註，一次完成預約申請。我們用乾淨環境與標準流程，照顧每一位毛小孩。
+                  </p>
+                  <div class="mt-7 flex flex-col sm:flex-row gap-3">
+                    <button @click="goBooking" class="bg-orange-500 text-white px-6 py-3 rounded-xl font-extrabold hover:bg-orange-600 transition">
+                      開始預約（3 步驟）
+                    </button>
+                    <a href="#rules" class="px-6 py-3 rounded-xl font-extrabold border-2 border-orange-200 text-orange-700 hover:bg-white transition text-center">
+                      查看服務規定
+                    </a>
+                  </div>
+                  <div class="mt-8 grid grid-cols-3 gap-4">
+                    <div class="bg-white rounded-2xl shadow-sm p-4 border border-orange-100">
+                      <div class="text-orange-600 font-extrabold text-xl">24h</div>
+                      <div class="text-gray-600 text-sm font-semibold mt-1">安心照護流程</div>
+                    </div>
+                    <div class="bg-white rounded-2xl shadow-sm p-4 border border-orange-100">
+                      <div class="text-orange-600 font-extrabold text-xl">消毒</div>
+                      <div class="text-gray-600 text-sm font-semibold mt-1">定時清潔通風</div>
+                    </div>
+                    <div class="bg-white rounded-2xl shadow-sm p-4 border border-orange-100">
+                      <div class="text-orange-600 font-extrabold text-xl">透明</div>
+                      <div class="text-gray-600 text-sm font-semibold mt-1">照護紀錄回報</div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 今日空房狀態 -->
+                <div class="bg-white rounded-3xl shadow-xl border border-orange-100 overflow-hidden">
+                  <div class="p-6">
+                    <div class="flex items-center justify-between mb-4">
+                      <div>
+                        <div class="text-sm font-bold text-gray-500">即時更新</div>
+                        <div class="text-xl font-extrabold text-gray-900 mt-0.5">今日空房狀態</div>
+                      </div>
+                      <button @click="fetchRooms" :disabled="roomsLoading"
+                        class="text-xs px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-600 font-bold rounded-full border border-orange-200 transition">
+                        {{ roomsLoading ? '載入中…' : '🔄 重新整理' }}
+                      </button>
+                    </div>
+
+                    <!-- 摘要 -->
+                    <div class="grid grid-cols-2 gap-3 mb-4">
+                      <div class="bg-emerald-50 border border-emerald-100 rounded-xl p-3 text-center">
+                        <div class="text-2xl font-extrabold text-emerald-600">{{ availableCount }}</div>
+                        <div class="text-xs font-bold text-emerald-700 mt-0.5">可預約</div>
+                      </div>
+                      <div class="bg-gray-50 border border-gray-100 rounded-xl p-3 text-center">
+                        <div class="text-2xl font-extrabold text-gray-500">{{ rooms.length - availableCount }}</div>
+                        <div class="text-xs font-bold text-gray-500 mt-0.5">已佔用</div>
+                      </div>
+                    </div>
+
+                    <!-- 房間列表 -->
+                    <div v-if="roomsLoading" class="py-6 text-center text-gray-400 text-sm font-semibold">載入中…</div>
+                    <div v-else-if="rooms.length === 0" class="py-6 text-center text-gray-400 text-sm font-semibold">無法取得房間資料</div>
+                    <div v-else class="space-y-2">
+                      <div v-for="r in rooms" :key="r.id"
+                        class="flex items-center justify-between px-4 py-2.5 rounded-xl border"
+                        :class="r.status === 'available' ? 'bg-emerald-50 border-emerald-100' :
+                                r.status === 'reserved'  ? 'bg-amber-50 border-amber-100' :
+                                r.status === 'occupied'  ? 'bg-red-50 border-red-100' :
+                                                           'bg-gray-50 border-gray-100'">
+                        <div class="flex items-center gap-3">
+                          <span class="font-extrabold text-sm text-gray-700 font-mono">{{ r.room_code }}</span>
+                          <span class="text-xs text-gray-500 font-semibold">{{ {standard_cat:'標準貓艙', deluxe_dog:'豪華犬舍', suite:'尊爵套房'}[r.room_type] || r.room_type }}</span>
+                        </div>
+                        <span class="text-xs font-extrabold px-2.5 py-1 rounded-full"
+                          :class="r.status === 'available' ? 'bg-emerald-500 text-white' :
+                                  r.status === 'reserved'  ? 'bg-amber-400 text-white' :
+                                  r.status === 'occupied'  ? 'bg-red-400 text-white' :
+                                                             'bg-gray-300 text-gray-700'">
+                          {{ {available:'可預約', reserved:'已預約', occupied:'住宿中', cleaning:'清潔中'}[r.status] || r.status }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="bg-gradient-to-r from-orange-500 to-amber-500 h-1.5"></div>
+                  <div class="px-6 py-3 bg-orange-50 flex items-center justify-between">
+                    <span class="text-xs text-gray-500 font-semibold">看到喜歡的房型？</span>
+                    <button @click="goBooking" class="text-xs font-extrabold text-orange-600 hover:text-orange-700">立即預約 →</button>
+                  </div>
+                </div>
+              </section>
+
+              <!-- ── 最新消息 ── -->
+              <section id="news" class="pb-14">
+                <div class="flex items-end justify-between gap-4 mb-6">
+                  <div>
+                    <h2 class="text-2xl md:text-3xl font-extrabold">最新消息</h2>
+                    <p class="mt-1 text-gray-600 font-semibold">公告、服務更新與重要提醒。</p>
+                  </div>
+                </div>
+                <div class="space-y-4">
+                  <div v-for="n in news" :key="n.title"
+                    class="bg-white rounded-2xl border border-orange-100 shadow-sm p-5 flex gap-4 items-start hover:shadow-md transition">
+                    <div class="shrink-0 text-sm text-gray-400 font-semibold w-24 pt-0.5">{{ n.date }}</div>
+                    <div class="flex-1">
+                      <div class="flex items-center gap-2 mb-1.5">
+                        <span :class="['text-xs font-extrabold px-2.5 py-0.5 rounded-full', n.tagColor]">{{ n.tag }}</span>
+                        <span class="font-extrabold text-gray-900">{{ n.title }}</span>
+                      </div>
+                      <p class="text-sm text-gray-600 leading-relaxed">{{ n.body }}</p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <!-- ── 優惠促銷 ── -->
+              <section id="promos" class="pb-14">
+                <div class="mb-6">
+                  <h2 class="text-2xl md:text-3xl font-extrabold">優惠促銷</h2>
+                  <p class="mt-1 text-gray-600 font-semibold">現正進行中的優惠方案，預約時告知優惠碼即可套用。</p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  <div v-for="p in promos" :key="p.title"
+                    class="bg-white rounded-2xl border border-orange-100 shadow-sm overflow-hidden hover:shadow-md transition">
+                    <div class="bg-gradient-to-br from-orange-50 to-amber-50 p-6 border-b border-orange-100">
+                      <div class="flex items-start justify-between gap-2 mb-3">
+                        <span class="text-3xl">{{ p.emoji }}</span>
+                        <span :class="['text-xs font-extrabold px-2.5 py-0.5 rounded-full', p.labelColor]">{{ p.label }}</span>
+                      </div>
+                      <h3 class="text-lg font-extrabold text-gray-900">{{ p.title }}</h3>
+                      <p class="mt-1.5 text-sm text-gray-600 leading-relaxed">{{ p.desc }}</p>
+                    </div>
+                    <div class="p-4 flex items-center justify-between">
+                      <div>
+                        <div class="text-xs text-gray-500 font-semibold">優惠碼</div>
+                        <div class="font-extrabold text-orange-600 tracking-widest">{{ p.code }}</div>
+                      </div>
+                      <div class="text-right">
+                        <div class="text-xs text-gray-500 font-semibold">
+                          {{ typeof daysLeft(p.expiry) === 'number' ? '剩餘' : '效期' }}
+                        </div>
+                        <div class="font-extrabold text-sm"
+                          :class="typeof daysLeft(p.expiry) === 'number' && daysLeft(p.expiry) <= 14 ? 'text-red-500' : 'text-gray-700'">
+                          {{ typeof daysLeft(p.expiry) === 'number' ? daysLeft(p.expiry) + ' 天' : p.expiry }}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <p class="mt-4 text-xs text-gray-500 font-semibold">＊優惠不可同時並用。如有疑問請來電洽詢。</p>
+              </section>
+
+              <!-- ── 服務規定 ── -->
+              <section id="rules" class="pb-14">
+                <div class="mb-6">
+                  <h2 class="text-2xl md:text-3xl font-extrabold">服務規定</h2>
+                  <p class="mt-1 text-gray-600 font-semibold">為確保所有毛孩的安全，請在預約前詳閱以下規定。</p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                  <div v-for="r in rules" :key="r.title"
+                    class="bg-white rounded-2xl border border-orange-100 shadow-sm p-6 hover:shadow-md transition">
+                    <div class="flex items-center gap-3 mb-4">
+                      <span class="text-2xl">{{ r.icon }}</span>
+                      <h3 class="font-extrabold text-gray-900 text-lg">{{ r.title }}</h3>
+                    </div>
+                    <ul class="space-y-2">
+                      <li v-for="item in r.items" :key="item" class="flex items-start gap-2 text-sm text-gray-600 leading-relaxed">
+                        <span class="text-orange-400 font-extrabold mt-0.5 shrink-0">·</span>
+                        {{ item }}
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+                <div class="mt-6 bg-orange-50 border border-orange-200 rounded-2xl p-5 flex gap-4 items-start">
+                  <span class="text-2xl shrink-0">⚠️</span>
+                  <div>
+                    <div class="font-extrabold text-orange-800 mb-1">重要提醒</div>
+                    <p class="text-sm text-orange-700 leading-relaxed">
+                      疫苗規定由系統自動驗證，過期或缺件將直接擋關無法送出預約。請於預約前確認疫苗有效期，如有疑問請先來電詢問，避免影響您的住宿計劃。
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              <!-- ── 房型 ── -->
+              <section id="rooms" class="pb-14">
+                <div class="flex items-end justify-between gap-4">
+                  <div>
+                    <h2 class="text-2xl md:text-3xl font-extrabold">熱門房型</h2>
+                    <p class="mt-2 text-gray-600 font-semibold">依體型與需求選擇最合適的房型。</p>
+                  </div>
+                  <button @click="goBooking" class="hidden sm:inline-flex bg-orange-500 text-white px-5 py-2 rounded-full font-extrabold hover:bg-orange-600 transition">
+                    查看空房與價格
+                  </button>
+                </div>
+                <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  <div v-for="r in roomHighlights" :key="r.name" class="bg-white rounded-2xl shadow-sm border border-orange-100 overflow-hidden">
+                    <div class="h-36 bg-gradient-to-br from-orange-100 to-amber-100 flex items-center justify-center text-4xl">🏠</div>
+                    <div class="p-5">
+                      <div class="flex items-center justify-between gap-3">
+                        <div class="text-lg font-extrabold">{{ r.name }}</div>
+                        <span class="text-xs font-extrabold text-orange-700 bg-orange-50 px-3 py-1 rounded-full border border-orange-100">{{ r.tag }}</span>
+                      </div>
+                      <div class="mt-3 flex items-end justify-between">
+                        <div class="text-gray-600 text-sm font-semibold">每晚</div>
+                        <div class="text-orange-600 text-2xl font-extrabold">NT$ {{ r.price }}</div>
+                      </div>
+                      <button @click="goBooking" class="mt-4 w-full border-2 border-orange-200 text-orange-700 py-2.5 rounded-xl font-extrabold hover:bg-orange-50 transition">
+                        立即預約此房型
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <!-- ── 服務特色 ── -->
+              <section id="service" class="pb-14">
+                <div class="bg-white rounded-3xl shadow-sm border border-orange-100 p-6 md:p-10">
+                  <h2 class="text-2xl md:text-3xl font-extrabold">服務特色</h2>
+                  <p class="mt-2 text-gray-600 font-semibold">我們用流程與環境把關，讓照護更可預期。</p>
+                  <div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div v-for="f in features" :key="f.title" class="rounded-2xl border border-gray-100 p-6 bg-orange-50/50">
+                      <div class="text-orange-600 font-extrabold text-lg">{{ f.title }}</div>
+                      <div class="mt-2 text-gray-600 font-semibold leading-relaxed">{{ f.desc }}</div>
+                    </div>
+                  </div>
+                  <div class="mt-8 flex flex-col sm:flex-row gap-3 justify-end">
+                    <a href="#faq" class="px-6 py-3 rounded-xl font-extrabold border-2 border-orange-200 text-orange-700 hover:bg-white transition text-center">先看常見問題</a>
+                    <button @click="goBooking" class="bg-orange-500 text-white px-6 py-3 rounded-xl font-extrabold hover:bg-orange-600 transition">直接開始預約</button>
+                  </div>
+                </div>
+              </section>
+
+              <!-- ── FAQ ── -->
+              <section id="faq" class="pb-16">
+                <h2 class="text-2xl md:text-3xl font-extrabold">常見問題</h2>
+                <p class="mt-2 text-gray-600 font-semibold">你可能會想先知道的事情。</p>
+                <div class="mt-6 space-y-3">
+                  <button v-for="(item, idx) in faqs" :key="item.q" @click="setActiveFaq(idx)"
+                    class="w-full text-left bg-white rounded-2xl border border-orange-100 shadow-sm px-5 py-4">
+                    <div class="flex items-center gap-4">
+                      <div class="w-9 h-9 rounded-full bg-orange-50 border border-orange-100 text-orange-700 font-extrabold flex items-center justify-center shrink-0">?</div>
+                      <div class="flex-1">
+                        <div class="font-extrabold text-gray-900">{{ item.q }}</div>
+                        <div v-if="activeFaq === idx" class="mt-2 text-gray-600 font-semibold leading-relaxed">{{ item.a }}</div>
+                      </div>
+                      <div class="text-gray-500 font-extrabold shrink-0">{{ activeFaq === idx ? '－' : '＋' }}</div>
+                    </div>
+                  </button>
+                </div>
+              </section>
+
+            </main>
+
+            <!-- ── Footer ── -->
+            <footer class="border-t border-orange-100 bg-white">
+              <div class="max-w-6xl mx-auto px-4 py-8 flex flex-col md:flex-row gap-6 justify-between">
+                <div>
+                  <div class="font-extrabold text-orange-600 text-lg">PetHotel Pro</div>
+                  <div class="mt-2 text-sm text-gray-600 font-semibold leading-relaxed">
+                    營業時間：10:00 – 20:00<br />
+                    聯絡電話：(02) 0000-0000<br />
+                    地址：台北市（示意）
+                  </div>
+                </div>
+                <div class="flex flex-col gap-2 text-sm font-semibold text-gray-500">
+                  <a href="#news"   class="hover:text-orange-600">最新消息</a>
+                  <a href="#promos" class="hover:text-orange-600">優惠促銷</a>
+                  <a href="#rules"  class="hover:text-orange-600">服務規定</a>
+                  <a href="#faq"    class="hover:text-orange-600">常見問題</a>
+                </div>
+                <div class="flex flex-col items-start md:items-end gap-3">
+                  <button @click="goBooking" class="bg-orange-500 text-white px-6 py-3 rounded-xl font-extrabold hover:bg-orange-600 transition">立即預約</button>
+                  <div class="text-xs text-gray-500 font-semibold">© {{ year }} PetHotel Pro. All rights reserved.</div>
+                </div>
+              </div>
+            </footer>
+
+          </div>
+        `,
+      }).mount('#app');
+    </script>
+  </body>
+</html>

@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>保母工作台 - PetHotel Pro</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+
+    <style>
+      .animate-fade-in {
+        animation: fadeIn 0.4s ease-in-out;
+      }
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    </style>
+  </head>
+  <body class="bg-amber-50 font-sans text-gray-800">
+    <div id="app"></div>
+
+    <script>
+      const { createApp, ref, onMounted, computed } = Vue;
+
+      createApp({
+        setup() {
+          const bookings = ref([]);
+          const selectedBookingId = ref(null);
+          
+          // 保母照護表單
+          const feedStatus = ref('正常進食');
+          const poopStatus = ref('正常且乾淨');
+          const moodStatus = ref('非常活潑好動');
+          const customNote = ref('');
+          const reportPhoto = ref('');
+
+          const isLoading = ref(false);
+          const isFetching = ref(false);
+          const successToast = ref('');
+          const errorMessage = ref('');
+
+          // 預設精緻照護情境照片 (Unsplash 精選)
+          const carePresets = [
+            { name: '🥣 營養放飯時間', url: 'https://images.unsplash.com/photo-1589748438579-c79377df1ab4?w=500&auto=format&fit=crop&q=80' },
+            { name: '🥎 草地翻滾放風', url: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=500&auto=format&fit=crop&q=80' },
+            { name: '💤 午後半溫馨熟睡', url: 'https://images.unsplash.com/photo-1537151608828-ea2b117b6281?w=500&auto=format&fit=crop&q=80' },
+          ];
+
+          const fetchBookings = async () => {
+            isFetching.value = true;
+            try {
+              const token = localStorage.getItem('access_token');
+              const res = await fetch('/api/booking/all', {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              const data = await res.json();
+              if (res.ok) {
+                bookings.value = data.bookings;
+              }
+            } catch (err) {
+              console.error("載入預約清單失敗", err);
+            } finally {
+              isFetching.value = false;
+            }
+          };
+
+          const activeBookings = computed(() => {
+            return bookings.value.filter(b => b.status === 'confirmed' && !b.roomId.startsWith('groomer_'));
+          });
+
+          onMounted(() => {
+            // 🔒 權限與登入狀態安全查核
+            const token = localStorage.getItem('access_token');
+            const role = localStorage.getItem('user_role');
+            if (!token || role !== 'nanny') {
+              // 若未登入或角色非保母，強制跳轉回登入頁面
+              window.location.href = './login.html';
+              return;
+            }
+
+            fetchBookings();
+            reportPhoto.value = carePresets[0].url; // 預設第一張
+          });
+
+          const selectPreset = (url) => {
+            reportPhoto.value = url;
+          };
+
+          const showSuccessToast = (msg) => {
+            successToast.value = msg;
+            setTimeout(() => {
+              successToast.value = '';
+            }, 3500);
+          };
+
+          const submitCareLog = async () => {
+            if (!selectedBookingId.value) {
+              errorMessage.value = '請先選擇要回報的寵物預約';
+              return;
+            }
+
+            isLoading.value = true;
+            errorMessage.value = '';
+
+            // 組合日常照護狀態報告文字
+            const compositeMessage = `【保母日常照護回報】\n` + 
+                                     `🍲 飲食狀態：${feedStatus.value}\n` +
+                                     `💩 排泄狀況：${poopStatus.value}\n` +
+                                     `❤️ 精神活力：${moodStatus.value}\n` +
+                                     `📝 照護備註：${customNote.value || '毛孩今天適應良好，非常乖巧討人喜歡！'}`;
+
+            try {
+              const res = await fetch(`/api/booking/${selectedBookingId.value}/report`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  image_url: reportPhoto.value,
+                  message: compositeMessage
+                })
+              });
+
+              const data = await res.json();
+
+              if (res.ok) {
+                showSuccessToast('🎉 保母日常照護狀態已成功發送！飼主已收到即時推播通知！');
+                customNote.value = '';
+                fetchBookings();
+              } else {
+                throw new Error(data.error || '發送日常回報失敗');
+              }
+            } catch (err) {
+              errorMessage.value = err.message || '連線失敗，請稍後再試';
+            } finally {
+              isLoading.value = false;
+            }
+          };
+
+          return {
+            bookings,
+            activeBookings,
+            selectedBookingId,
+            feedStatus,
+            poopStatus,
+            moodStatus,
+            customNote,
+            reportPhoto,
+            carePresets,
+            isLoading,
+            isFetching,
+            successToast,
+            errorMessage,
+            selectPreset,
+            submitCareLog,
+            fetchBookings
+          };
+        },
+        template: `
+          <div class="min-h-screen bg-amber-50 font-sans text-gray-800">
+            <header class="bg-white shadow-sm sticky top-0 z-10">
+              <div class="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+                <a href="./index.html" class="text-2xl font-extrabold text-amber-600 hover:text-amber-700 transition">🍼 PetHotel Pro 工作台</a>
+                <span class="bg-amber-100 text-amber-800 text-xs font-bold px-3 py-1.5 rounded-full border border-amber-200">
+                  角色：專業寵物安親保母 🧑‍⚕️
+                </span>
+              </div>
+            </header>
+
+            <main class="max-w-6xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+              
+              <!-- 左側：在店寵物列表 -->
+              <section class="lg:col-span-1 bg-white rounded-2xl shadow-lg p-6 flex flex-col">
+                <div class="flex justify-between items-center mb-6">
+                  <h2 class="text-xl font-bold border-l-4 border-amber-500 pl-2">安親在店毛孩</h2>
+                  <button @click="fetchBookings" :disabled="isFetching" class="text-sm text-amber-600 font-bold hover:underline">
+                    {{ isFetching ? '更新中...' : '🔄 重新整理' }}
+                  </button>
+                </div>
+
+                <div v-if="activeBookings.length === 0" class="text-center py-10 text-gray-400 text-sm">
+                  📭 目前店內沒有進行中的安親或住宿預約
+                </div>
+
+                <div class="space-y-3 overflow-y-auto max-h-[500px]">
+                  <div v-for="b in activeBookings" :key="b.id"
+                    @click="selectedBookingId = b.id"
+                    :class="['p-4 rounded-xl border-2 cursor-pointer transition transform hover:-translate-y-0.5', selectedBookingId === b.id ? 'border-amber-500 bg-amber-50/50 shadow-md' : 'border-gray-100 hover:border-amber-200 bg-white']">
+                    <div class="flex justify-between items-start mb-2">
+                      <span class="font-extrabold text-lg text-gray-800">🐾 {{ b.petName }}</span>
+                      <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700">
+                        安親照護中
+                      </span>
+                    </div>
+                    <div class="text-xs text-gray-500 space-y-1">
+                      <div>安置空間：<span class="font-bold text-gray-700">{{ b.roomId === 'daycare_R01' ? '陽光貓草樂園' : b.roomId === 'daycare_R02' ? '萌犬奔跑草皮' : b.roomId }}</span></div>
+                      <div>期間：{{ b.checkIn }} 至 {{ b.checkOut }}</div>
+                      <div class="text-amber-700 font-semibold" v-if="b.petNotes">📝 備註：{{ b.petNotes }}</div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <!-- 右側：日常照護回報填寫區 -->
+              <section class="lg:col-span-2 space-y-6">
+                <!-- 提示資訊 -->
+                <div v-if="successToast" class="p-4 bg-green-50 border-l-4 border-green-500 text-green-800 rounded-xl text-sm font-bold shadow-md animate-fade-in flex justify-between items-center">
+                  <span>{{ successToast }}</span>
+                  <button @click="successToast = ''" class="text-green-900 font-bold ml-4">✕</button>
+                </div>
+                <div v-if="errorMessage" class="p-4 bg-red-50 border-l-4 border-red-500 text-red-800 rounded-xl text-sm font-bold shadow-md animate-fade-in">
+                  ⚠️ {{ errorMessage }}
+                </div>
+
+                <div class="bg-white rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
+                  <h2 class="text-2xl font-bold border-l-4 border-amber-500 pl-3">發送保母照護狀態日誌</h2>
+                  
+                  <!-- 照護狀態選擇表單 -->
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label class="block text-sm font-bold text-gray-700 mb-2">🍲 飲食狀況</label>
+                      <select v-model="feedStatus" class="w-full border-gray-300 rounded-lg p-3 border focus:ring-amber-500">
+                        <option>正常進食，全部吃光</option>
+                        <option>進食緩慢，剩下一些</option>
+                        <option>食慾不佳，挑食不吃</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-sm font-bold text-gray-700 mb-2">💩 排泄排尿</label>
+                      <select v-model="poopStatus" class="w-full border-gray-300 rounded-lg p-3 border focus:ring-amber-500">
+                        <option>正常且乾淨</option>
+                        <option>有軟便現象，需觀察</option>
+                        <option>尚未排便/排尿</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-sm font-bold text-gray-700 mb-2">❤️ 精神活力</label>
+                      <select v-model="moodStatus" class="w-full border-gray-300 rounded-lg p-3 border focus:ring-amber-500">
+                        <option>非常活潑好動</option>
+                        <option>情緒溫和，喜好撒嬌</option>
+                        <option>稍顯害羞，躲在屋角</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <!-- 照護情境美照搭配 -->
+                  <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-3">⭐ 選擇搭配的日常照護情境美照</label>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div v-for="preset in carePresets" :key="preset.name"
+                        @click="selectPreset(preset.url)"
+                        :class="['border-2 rounded-xl overflow-hidden cursor-pointer transition transform hover:-translate-y-0.5', reportPhoto === preset.url ? 'border-amber-500 shadow-md ring-2 ring-amber-300' : 'border-gray-200']">
+                        <div class="h-32 bg-gray-100">
+                          <img :src="preset.url" class="w-full h-full object-cover">
+                        </div>
+                        <div class="p-2 text-center text-xs font-bold text-gray-700">{{ preset.name }}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 補充留言 -->
+                  <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">💬 補充說明 / 照護日誌心得</label>
+                    <textarea v-model="customNote" rows="3" placeholder="例如：大黃下午散步了20分鐘，精神超級好，喝水量也很足夠，請飼主放心！" 
+                      class="w-full border-gray-300 rounded-lg p-4 border focus:ring-amber-500 focus:border-amber-500 transition shadow-sm"></textarea>
+                  </div>
+
+                  <!-- 提交按鈕 -->
+                  <div class="flex justify-end pt-4 border-t">
+                    <button @click="submitCareLog" :disabled="isLoading || !selectedBookingId"
+                      class="bg-amber-500 text-white px-10 py-4 rounded-xl font-bold hover:bg-amber-600 disabled:opacity-50 transition shadow-md hover:shadow-lg flex items-center">
+                      <span v-if="isLoading" class="animate-spin mr-2">⏳</span>
+                      🚀 發送保母照護狀態日誌給飼主
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+            </main>
+          </div>
+        `,
+      }).mount('#app');
+    </script>
+  </body>
+</html>
